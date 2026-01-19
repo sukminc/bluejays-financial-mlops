@@ -1,9 +1,5 @@
-```markdown
-# Blue Jays Moneyball: Financial Forecasting & Integrity System
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Status](https://img.shields.io/badge/Phase-1-Complete-green)
-![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen)
+# Blue Jays Moneyball: Financial Forecasting & Integrity System
 
 ## 📌 Project Overview
 This project applies **Data Engineering** and **Machine Learning** to forecast the Toronto Blue Jays' financial future. 
