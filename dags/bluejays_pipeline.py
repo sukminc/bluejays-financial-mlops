@@ -21,7 +21,7 @@ with DAG(
 ) as dag:
 
     # Task 1: Environment Setup (Install Dependencies)
-    # Note: In a real production environment, these should be pre-installed 
+    # Note: In a real production environment, these should be pre-installed
     # in the Docker Image. We install them at runtime here for local testing.
     install_deps = BashOperator(
         task_id='install_dependencies',
