@@ -1,0 +1,39 @@
+name: Blue Jays MLOps CI Pipeline
+
+# Trigger: Run on push or pull request to the main branch
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  # Job: Data Integrity & Quality Assurance
+  data-integrity-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Check out the repository code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Set up Python 3.12 environment
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip' # Caches dependencies to speed up future runs
+
+    # 3. Install Dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pandas # Ensure testing tools are installed
+
+    # 4. Run Pytest (The Quality Gate)
+    # We export PYTHONPATH=. to ensure the tests can import the 'src' module
+    - name: Run Data Integrity Tests
+      run: |
+        export PYTHONPATH=$PYTHONPATH:.
+        pytest tests/
