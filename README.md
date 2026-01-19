@@ -1,11 +1,3 @@
-This is the final polish for Phase 1. A strong `README.md` is what turns a repository into a **Portfolio Piece**. It tells the recruiter exactly what you built, how it works, and shows off your engineering standards.
-
-Here is the professional content for your `README.md`.
-
-### Action Item: Update `README.md`
-
-Overwrite your current `README.md` with the content below.
-
 ```markdown
 # Blue Jays Moneyball: Financial Forecasting & Integrity System
 
