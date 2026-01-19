@@ -2,40 +2,41 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from datetime import datetime, timedelta
 
-# Default settings (Owner, retries on failure, etc.)
 default_args = {
     'owner': 'Chris Yoon',
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
 
-# DAG Definition
 with DAG(
-    dag_id='bluejays_etl_pipeline_v1',
+    dag_id='bluejays_data_warehouse_v1',
     default_args=default_args,
-    description='Fetch MLB data, validate schema, and generate plots',
     start_date=datetime(2024, 1, 1),
-    schedule_interval='@daily',  # Runs daily
-    catchup=False,               # Prevent backfilling past data
-    tags=['mlops', 'bluejays'],
+    schedule_interval='@daily',
+    catchup=False,
+    tags=['de', 'bluejays'],
 ) as dag:
 
-    # Task 1: Data Integrity Check (SDET Core)
-    # The libraries are now pre-installed in the Docker image.
-    # We immediately run Pytest to ensure data adheres to the Schema Contract.
-    run_tests = BashOperator(
-        task_id='run_data_integrity_tests',
-        bash_command='python -m pytest /opt/airflow/tests'
-    )
-
-    # Task 2: Execute ETL & Visualization
-    # Load Data -> Validate -> Generate Plot
-    run_etl = BashOperator(
-        task_id='run_etl_visualization',
-        bash_command='python -m src.visualize',
+    # Step 1: Initialize Postgres Tables
+    init_db = BashOperator(
+        task_id='initialize_database',
+        bash_command='python -m src.init_db',
         env={'PYTHONPATH': '/opt/airflow'}
     )
 
-    # Define execution order (Arrows indicate flow)
-    # 1. Run Tests (Quality Gate) -> 2. Run ETL (Only if tests pass)
-    run_tests >> run_etl
+    # Step 2: Extract & Load Roster Data
+    load_data = BashOperator(
+        task_id='etl_bluejays_roster',
+        bash_command='python -m src.etl_bluejays',
+        env={'PYTHONPATH': '/opt/airflow'}
+    )
+
+    # Step 3: Data Integrity (Pytest)
+    run_tests = BashOperator(
+        task_id='run_data_integrity_tests',
+        bash_command='python -m pytest /opt/airflow/tests',
+        env={'PYTHONPATH': '/opt/airflow'}
+    )
+
+    # Pipeline Flow
+    init_db >> load_data >> run_tests
