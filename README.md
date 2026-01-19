@@ -91,6 +91,4 @@ python -m src.visualize
 **2024 Blue Jays: Performance (WAR) vs Cost (Salary)**
 *(See `plots/war_vs_salary.png` in the repo)*
 
-```
 
----
