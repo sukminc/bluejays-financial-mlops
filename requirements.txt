@@ -5,3 +5,7 @@ pytest
 pylint
 matplotlib
 seaborn
+requests
+lxml
+beautifulsoup4
+pandera
