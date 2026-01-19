@@ -1,0 +1,17 @@
+FROM apache/airflow:2.10.3
+
+# Switch to root to install system dependencies (git, gcc, etc.)
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libxml2-dev \
+    libxslt-dev \
+    git \
+    && apt-get clean
+
+# Switch back to airflow user to install Python packages
+USER airflow
+COPY requirements.txt /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt
