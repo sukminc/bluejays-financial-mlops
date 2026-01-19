@@ -4,3 +4,9 @@ __pycache__/
 .env
 data/
 venv/
+# Airflow Local Environment
+logs/
+config/
+plugins/
+airflow-worker.pid
+airflow-webserver.pid
