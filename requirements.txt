@@ -3,3 +3,5 @@ numpy
 pybaseball
 pytest
 pylint
+matplotlib
+seaborn

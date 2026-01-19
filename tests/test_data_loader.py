@@ -9,7 +9,9 @@ def test_create_analysis_dataset():
     # 1. Check if merge happened
     # We might have fewer rows than the full roster due to name mismatches,
     # but it shouldn't be empty for a major team.
-    assert not df.empty, "Merged dataset is empty. Check name matching or API data."
+    assert not df.empty, (
+        "Merged dataset is empty. Check name matching or API data."
+        )
     # 2. Check for Critical ML Columns
     required_cols = ['Name', 'WAR', 'Salary']
     for col in required_cols:
