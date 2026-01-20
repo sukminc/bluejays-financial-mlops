@@ -1,23 +1,22 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, ForeignKey, Date, BigInteger
+    Column, Integer, String, BigInteger, ForeignKey, Date, Float
 )
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
 
-
-class Base(DeclarativeBase):
-    pass
+# Use the legacy 1.4 compatible base
+Base = declarative_base()
 
 
 class DimPlayer(Base):
     __tablename__ = "dim_players"
 
-    player_id = Column(Integer, primary_key=True)  # MLB AM ID
+    player_id = Column(Integer, primary_key=True)
     name_display_first_last = Column(String(100), nullable=False)
     primary_position = Column(String(10))
     birth_date = Column(Date)
     bats = Column(String(5))
     throws = Column(String(5))
-    # Relationship to facts
     contracts = relationship("FactContract", back_populates="player")
 
 
@@ -29,10 +28,10 @@ class FactContract(Base):
         Integer,
         ForeignKey("dim_players.player_id"),
         nullable=False
-    )
+        )
     season = Column(Integer, nullable=False)
     base_salary = Column(BigInteger)
-    luxury_tax_salary = Column(BigInteger)  # AAV (Average Annual Value)
-    war = Column(Float)  # Performance metric for efficiency analysis
+    luxury_tax_salary = Column(BigInteger)
+    war = Column(Float)
 
     player = relationship("DimPlayer", back_populates="contracts")
