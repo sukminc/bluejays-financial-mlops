@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from src.models import DimPlayer
 
+# DB URL targeting the internal Docker service 'postgres'
 DB_URL = "postgresql://airflow:airflow@postgres:5432/airflow"
 engine = create_engine(DB_URL)
 Session = sessionmaker(bind=engine)
@@ -21,7 +22,7 @@ def load_roster_to_dw():
         for entry in roster:
             p_info = entry['person']
             p_id = p_info['id']
-            # PEP 8 Multi-line query
+            # Fixed "Line Too Long" using multi-line chaining
             player = (
                 session.query(DimPlayer)
                 .filter_by(player_id=p_id)
@@ -35,7 +36,6 @@ def load_roster_to_dw():
                 )
                 session.add(new_player)
         session.commit()
-        print(f"✅ ETL Sync: {len(roster)} players processed.")
     finally:
         session.close()
 

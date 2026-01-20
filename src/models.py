@@ -1,10 +1,15 @@
 from sqlalchemy import (
-    Column, Integer, String, BigInteger, ForeignKey, Date, Float
+    Column,
+    Integer,
+    String,
+    BigInteger,
+    ForeignKey,
+    Date,
+    Float,
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, declarative_base
 
-# Use the legacy 1.4 compatible base
+# Legacy compatible base for SQLAlchemy 1.4/2.0
 Base = declarative_base()
 
 
@@ -27,8 +32,8 @@ class FactContract(Base):
     player_id = Column(
         Integer,
         ForeignKey("dim_players.player_id"),
-        nullable=False
-        )
+        nullable=False,
+    )
     season = Column(Integer, nullable=False)
     base_salary = Column(BigInteger)
     luxury_tax_salary = Column(BigInteger)
