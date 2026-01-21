@@ -1,71 +1,112 @@
-# ⚾ Blue Jays Moneyball: Financial Forecasting & Integrity System
+# ⚾ Blue Jays Moneyball: Data Quality–Driven ETL Platform
 
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
-![Status](https://img.shields.io/badge/Phase--1-Enhanced-green)
+![Airflow](https://img.shields.io/badge/Apache%20Airflow-2.10%2B-orange)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Fact%2FDim-blue)
+![Status](https://img.shields.io/badge/Phase--1-Data%20Integrity%20Verified-green)
 ![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen)
-![Code Quality](https://img.shields.io/badge/Code%20Quality-A%2B-success)
 
 ## 📌 Project Overview
-This project applies **Data Engineering** and **Financial Analysis** to forecast the Toronto Blue Jays' financial future. Unlike simple statistics aggregators, this system focuses on **Data Integrity (SDET principles)** to ensure that data fed into Luxury Tax simulations is accurate, validated, and resilient against system failures.
 
-**Goal:** Predict future Arbitration salaries and simulate Competitive Balance Tax (CBT) implications using player performance metrics (WAR, Age, Service Time) and real-time payroll data scraped from Spotrac.
+This is a **production-oriented ETL and Data Quality platform** designed to ingest, normalize, and validate MLB player salary and performance data.
 
----
+While many sports analytics projects focus solely on modeling, **Blue Jays Moneyball** prioritizes the engineering challenges that actually break production systems: **silent join failures, entity resolution issues, and data drift.**
 
-## 👨‍💻 About the Author
-**Chris (Suk Min) Yoon** *Senior SDET / QA Automation Engineer (10+ Years Experience)* Specializing in data quality assurance, ETL validation, and backend testing across insurance and financial domains.
+**Core Philosophy:**
+> "The hardest problems in analytics aren't the models—they are the pipelines that 'succeed' with corrupted outputs."
 
-* **Expertise:** Python (Pandas, SQLAlchemy, PyTest), SQL, Apache Airflow, Docker, and Playwright.
-* **Background:** Proven track record in building automation frameworks at **theScore (ESPN Bet)** and leading QA strategies for enterprise clients like **Avesis** and **Jewelers Mutual**.
+This system treats data engineering with **SDET principles**, enforcing strict quality gates to ensure that no data downstream is used for forecasting unless it is proven correct.
 
 ---
 
-## 🚀 Key Features (Phase 1: MVP & Data Ingestion)
+## 🎯 Key Objectives
 
-### 1. Advanced Web Scraping Pipeline (Playwright)
-* **Headless Browser Automation:** Utilizes **Playwright** to handle dynamic JavaScript content on sites like Spotrac, overcoming limitations of static parsers (BeautifulSoup).
-* **Dockerized Browser Environment:** Custom-built Docker image pre-configured with Chromium binaries and system dependencies, resolving common "Ghost Binary" and shared memory issues in containerized scraping.
-* **Resilience:** Implements optimized page handling (e.g., `--disable-dev-shm-usage`) to ensure stability during heavy data extraction.
+1.  **Canonical Entity Resolution:** Deterministically map name-based external data (Spotrac) to canonical MLBAM IDs (`player_id`) using a dedicated bridge table.
+2.  **Deterministic Joins:** Ensure 100% reliable joins between disparate salary data and player performance stats.
+3.  **Fail-Fast Data Quality:** Detect and block bad data *immediately* via explicit DQ checks in the orchestration layer.
+4.  **Automated Infrastructure:** End-to-end execution in **Airflow + Docker + PostgreSQL** without manual intervention.
 
-### 2. Robust Data Warehouse & Orchestration
-* **Apache Airflow Integration:** Automated DAGs trigger the scraping scripts, process the raw HTML, and load data into the warehouse.
-* **Star Schema Architecture:** Production-grade PostgreSQL design with `dim_players` and `fact_contracts`.
-* **Containerized Stack:** The entire infrastructure (Postgres, Airflow Webserver/Scheduler, Playwright Workers) is defined in `docker-compose` for one-click deployment.
+---
 
-### 3. Automated Data QA (SDET Layer)
-* **Strict Linting & Compliance:** Adheres to PEP 8 standards with a zero-warning policy.
-* **Data Integrity Tests:** Integrated **Pytest** suite to validate schema consistency, foreign key relationships, and data accuracy across the ETL lifecycle.
+## 🏗 Architecture & Data Flow
+
+This project implements a **Extract → Map → Load → Verify** pattern to ensure integrity.
+
+```mermaid
+graph TD
+    A[Spotrac Web] -->|Playwright Scraper| B(Raw Payroll JSON)
+    C[MLB Stats API] -->|API Client| D(Raw Stats)
+    
+    B --> E{Name Resolution Bridge}
+    E -->|Map to MLBAM ID| F[fact_salary]
+    D -->|Direct Load| G[fact_player_stats]
+    
+    F --> H[DQ Gate]
+    G --> H
+    
+    H -->|Pass| I[Analytics Ready]
+    H -->|Fail| J[Pipeline Stop / Alert]
+
+```
+
+### 🧱 Canonical Data Model (Star Schema)
+
+* **`dim_players`**: The source of truth for player identity (Key: `player_id`).
+* **`fact_salary`**: Financial snapshots resolved to the canonical ID.
+* **`fact_player_stats`**: Performance metrics from the MLB API.
+* **`bridge_spotrac_player_map`**: A durable mapping table handling name variations (e.g., "Mike Trout" vs "Michael Trout").
+
+---
+
+## 🛡️ Data Quality Gate (Core Feature)
+
+Before any data is promoted to the analytics layer, the **DQ Gate** enforces four strict pillars of integrity. If *any* check fails, the pipeline halts to prevent contamination.
+
+| Check | Description |
+| --- | --- |
+| **1. Join Coverage** | Verifies 100% of `fact_salary` rows map to valid entries in `dim_players` and `fact_player_stats`. |
+| **2. Null Integrity** | Enforces that critical keys (like `player_id`) are never `NULL` in fact tables. |
+| **3. Duplicate Detection** | Scans for primary key violations (e.g., duplicate `season` + `player_id` entries per snapshot). |
+| **4. Snapshot Drift** | Monitors row counts against previous snapshots to detect sudden data loss (Drift > Threshold). |
 
 ---
 
 ## 🛠 Tech Stack
+
 * **Language:** Python 3.12+
 * **Orchestration:** Apache Airflow 2.10+
-* **Scraping:** Playwright (Chromium), LXML
 * **Database:** PostgreSQL (Star Schema)
-* **Infrastructure:** Docker, Docker Compose (Custom Image)
-* **Data Processing:** Pandas, SQLAlchemy
-* **Quality Assurance:** Pytest, Flake8, Pandera
+* **Scraping:** Playwright (Chromium, Dockerized)
+* **ORM:** SQLAlchemy
+* **Infrastructure:** Docker, Docker Compose
+* **Quality Assurance:** Flake8, Pytest, Custom DQ Framework
 
 ---
 
 ## 📂 Project Structure
+
 ```text
 bluejays-financial-mlops/
 ├── dags/
-│   ├── payroll_etl_dag.py       # Airflow DAG for Spotrac extraction
-│   └── bluejays_pipeline.py     # Main orchestration logic
-├── scripts/
-│   └── scraper_playwright.py    # Headless browser scraping logic
-├── docker-compose.yaml          # Full stack container configuration
-├── Dockerfile.airflow           # Custom image with Playwright & Browsers
-├── plots/                       # Generated visualizations
+│   ├── payroll_etl_dag.py       # Main Airflow DAG defining the workflow
+│   └── bluejays_pipeline.py     # Pipeline orchestration logic
 ├── src/
-│   ├── models.py                # SQLAlchemy Schema Definitions
-│   ├── etl_bluejays.py          # Roster Sync Logic
-│   └── init_db.py               # Database Initialization
-├── tests/                       # Unit & Data Integrity Tests
-└── requirements.txt             # Python Dependencies
+│   ├── db/
+│   │   ├── session.py           # Database engine & session management
+│   │   └── models.py            # SQLAlchemy schemas (Dim/Fact/Bridge)
+│   ├── extract/
+│   │   ├── spotrac.py           # Playwright-based Spotrac scraper
+│   │   └── mlb_stats_api.py     # MLB Stats API ingestion module
+│   ├── load/
+│   │   ├── map_spotrac.py       # Name resolution logic (The Bridge)
+│   │   ├── load_salary.py       # Loader for fact_salary
+│   │   └── load_stats.py        # Loader for fact_player_stats
+│   └── dq/
+│       └── checks.py            # The Data Quality Gate logic
+├── docker-compose.yaml          # Infrastructure definition
+├── Dockerfile.airflow           # Custom Airflow image with Playwright
+├── requirements.txt             # Python dependencies
+└── tests/                       # Unit and Integration tests
 
 ```
 
@@ -75,39 +116,35 @@ bluejays-financial-mlops/
 
 ### 1. Build the Infrastructure
 
-This project requires a custom Docker build to install Chromium dependencies.
+Build the custom Docker image. We use `--no-cache` to ensure the latest browser binaries are installed.
 
 ```bash
-# Build the image (using --no-cache is recommended for browser updates)
 docker-compose build --no-cache
 
 ```
 
-### 2. Launch Services
+### 2. Start Services
 
-Start the Airflow Scheduler, Webserver, and PostgreSQL database.
+Launch Airflow (Scheduler, Webserver) and the PostgreSQL database.
 
 ```bash
 docker-compose up -d
 
 ```
 
-### 3. Trigger the ETL Pipeline
+* **Airflow UI:** `http://localhost:8080`
+* **Credentials:** `airflow` / `airflow`
 
-1. Access the Airflow UI at `http://localhost:8080`.
-2. Login (default: `airflow` / `airflow`).
-3. Unpause and Trigger the **`bluejays_payroll_pipeline`** DAG.
-4. Watch the Graph view as the container launches a headless browser, scrapes Spotrac, and generates the payroll CSV.
+### 3. Trigger the Pipeline
 
-### 4. Run Data Integrity Tests
+1. Navigate to the Airflow UI.
+2. Enable and trigger the **`bluejays_payroll_pipeline`** DAG.
+3. Watch the graph execute:
+* **Extract:** Scrape Spotrac & call MLB API.
+* **Transform/Load:** Resolve identities and populate facts.
+* **Verify:** Execute the DQ Gate (Green = Pass, Red = Block).
 
-Verify that the data loaders and database schema meet quality standards:
 
-```bash
-# Run tests inside the container or locally if venv is active
-pytest tests/
-
-```
 
 ---
 
@@ -115,7 +152,21 @@ pytest tests/
 
 | Phase | Focus | Status |
 | --- | --- | --- |
-| **Phase 1** | **MVP & Data Integrity** (Postgres, Airflow, Docker) | ✅ Completed |
-| **Phase 1.5** | **Advanced Scraping** (Playwright Integration, Spotrac ETL) | ✅ Completed |
-| **Phase 2** | **"What-If" Simulation Engine** (Signings, Trades, & 2026 CBT Forecasts) | 🚧 In Progress |
-| **Phase 3** | **Cloud MLOps** (GCP integration & Salary Prediction Models) | 📅 Planned |
+| **Phase 1** | **Canonical ETL + DQ Gate** (Entity Resolution, Deterministic Joins) | ✅ **Complete** |
+| **Phase 2** | **"What-If" Simulation Engine** (Roster Trades, Signings) | ⏳ Planned |
+| **Phase 3** | **MLOps & Forecasting** (Salary Arbitration Predictions) | ⏳ Planned |
+
+---
+
+## 👨‍💻 About the Author
+
+**Chris (Suk Min) Yoon**
+*Senior SDET / Data QA Engineer (10+ Years Experience)*
+
+Specializing in **ETL Validation**, **Data Integrity**, and **Automation-First Quality Systems**.
+
+> **Note:** This repository intentionally prioritizes data correctness over analytics output. Every future model or forecast depends on this foundation—and this project proves that foundation is solid.
+
+```
+
+```
