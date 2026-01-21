@@ -1,11 +1,28 @@
+# --- Core Data & ETL ---
 pandas
 numpy
-pybaseball
-pytest
-pylint
-matplotlib
-seaborn
 requests
 lxml
 beautifulsoup4
-pandera
+pybaseball
+sqlalchemy
+psycopg2-binary
+
+# --- Data Quality & Validation (Resume Highlight) ---
+pandera 
+pylint
+
+# --- Automation & Scraping ---
+playwright
+pytest
+pytest-playwright
+
+# --- Orchestration ---
+apache-airflow
+
+# --- Visualization (Optional but good for Moneyball) ---
+# matplotlib
+# seaborn
+
+# --- ML (Keep only lighter libs for forecasting) ---
+# scikit-learn
