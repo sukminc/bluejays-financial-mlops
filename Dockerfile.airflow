@@ -1,35 +1,33 @@
 FROM apache/airflow:2.10.3
 
+# Install OS-level dependencies (incl. Playwright runtime deps)
 USER root
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
     gcc \
     g++ \
     libxml2-dev \
     libxslt-dev \
-    git \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-USER airflow
-
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/airflow/browsers
-RUN mkdir -p /opt/airflow/browsers
-
+# Python dependencies (Airflow image blocks pip as root)
 COPY requirements.txt /requirements.txt
+RUN chown airflow:0 /requirements.txt
+
+USER airflow
 RUN pip install --no-cache-dir -r /requirements.txt
 
-RUN playwright install chromium
+# Playwright browser install (browsers cached inside the image)
+USER root
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/airflow/browsers
+RUN mkdir -p /opt/airflow/browsers && \
+    chown -R airflow:0 /opt/airflow/browsers
+
+# IMPORTANT: --with-deps installs any missing OS deps for Chromium on Debian-based images.
+RUN playwright install --with-deps chromium
+
+USER airflow

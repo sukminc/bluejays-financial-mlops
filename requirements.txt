@@ -18,7 +18,6 @@ pytest
 pytest-playwright
 
 # --- Orchestration ---
-apache-airflow
 
 # --- Visualization (Optional but good for Moneyball) ---
 # matplotlib

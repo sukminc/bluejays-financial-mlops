@@ -16,10 +16,14 @@ def fetch_spotrac_payroll():
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     with sync_playwright() as p:
-        
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-dev-shm-usage"]  
+            args=[
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-gpu"
+            ]
         )
 
         user_agent = (
@@ -56,6 +60,7 @@ def fetch_spotrac_payroll():
 
         browser.close()
 
+    # 데이터 저장
     df = pd.DataFrame(data)
     df['salary'] = df['salary_text'].replace(r'[\$,]', '', regex=True)
     df['salary'] = pd.to_numeric(df['salary'], errors='coerce').fillna(0)
