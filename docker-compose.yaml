@@ -140,6 +140,9 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    environment:
+      <<: *airflow-common-env
+      AIRFLOW__WEBSERVER__BASE_URL: "http://localhost:8080"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -179,6 +182,7 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
+      AIRFLOW__CELERY__WORKER_LOG_SERVER_PORT: "8793"
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -249,8 +253,9 @@ services:
           echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
           echo
         fi
-        mkdir -p /sources/logs /sources/dags /sources/plugins
+        mkdir -p /sources/logs /sources/dags /sources/plugins /sources/data /sources/data/stats
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        chown -R "${AIRFLOW_UID}:0" /sources/data
         exec /entrypoint airflow version
     # yamllint enable rule:line-length
     environment:

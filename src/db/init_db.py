@@ -1,27 +1,22 @@
-"""Database schema initializer.
-
-This script creates all ORM tables in Postgres for local development.
-In production, use migrations (e.g., Alembic). For this project phase,
-`create_all` is sufficient and deterministic.
-"""
-
+# src/db/init_db.py
 from __future__ import annotations
 
-import sys
+from sqlalchemy import create_engine
 
 from src.db.models import Base
-from src.db.session import engine
+
+DB_URL = "postgresql://airflow:airflow@postgres:5432/airflow"
 
 
-def init_db() -> None:
-    """Create all tables defined in ORM models."""
-    try:
-        Base.metadata.create_all(bind=engine)
-        print("Success: schema initialized.")
-    except Exception as exc:
-        print(f"CRITICAL ERROR: {exc}", file=sys.stderr)
-        raise
+def init_db_schema() -> None:
+    engine = create_engine(DB_URL)
+    Base.metadata.create_all(bind=engine)
+
+
+def main() -> None:
+    init_db_schema()
+    print("DB schema init complete.")
 
 
 if __name__ == "__main__":
-    init_db()
+    main()

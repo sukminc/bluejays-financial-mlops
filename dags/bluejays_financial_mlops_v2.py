@@ -1,92 +1,74 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
+import pendulum
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
+DAG_ID = "bluejays_financial_mlops_v2"
+TZ = "America/Toronto"
 
 DEFAULT_ARGS = {
     "owner": "Chris Yoon",
     "retries": 1,
-    "retry_delay": timedelta(minutes=5),
+    "retry_delay": timedelta(minutes=3),
 }
 
 
-def _py(module: str) -> str:
+def bash(module: str) -> str:
     """
-    Run a python module inside the Airflow container.
-    We rely on PYTHONPATH=/opt/airflow so `import src...` works.
+    Run a Python module inside the Airflow container with a stable PYTHONPATH.
+
+    We explicitly `cd /opt/airflow` so relative imports / files behave the same
+    as interactive debugging inside the container.
     """
-    return f"python -m {module}"
+    return (
+        "set -euo pipefail; "
+        "cd /opt/airflow; "
+        "PYTHONPATH=/opt/airflow python -m " + module
+    )
 
 
 with DAG(
-    dag_id="bluejays_financial_mlops_v2",
+    dag_id=DAG_ID,
     default_args=DEFAULT_ARGS,
-    start_date=datetime(2024, 1, 1),
+    description=(
+        "Baseline: init_db -> "
+        "roster_sync -> "
+        "salary_load -> "
+        "stats_load -> "
+        "dq_gate"),
+    start_date=pendulum.datetime(2026, 1, 20, tz=TZ),
     schedule="@daily",
     catchup=False,
-    tags=["bluejays", "etl", "dq"],
+    max_active_runs=1,
+    tags=["bluejays", "dq", "baseline", "v2"],
 ) as dag:
-    # 1) Init DB schema (dim/fact tables)
     init_db = BashOperator(
         task_id="init_db",
-        bash_command=_py("src.db.init_db"),
-        env={"PYTHONPATH": "/opt/airflow"},
+        bash_command=bash("src.db.init_db"),
     )
 
-    # 2) Extract roster + stats raw from MLB API
-    extract_mlb = BashOperator(
-        task_id="extract_mlb_roster_stats",
-        bash_command=_py("src.extract.mlb_stats_api"),
-        env={"PYTHONPATH": "/opt/airflow"},
+    roster_sync = BashOperator(
+        task_id="roster_sync",
+        bash_command=bash("src.extract.mlb_stats_api"),
     )
 
-    # 3) Extract payroll raw from Spotrac (Playwright)
-    extract_spotrac = BashOperator(
-        task_id="extract_spotrac_payroll",
-        bash_command=_py("src.extract.spotrac"),
-        env={"PYTHONPATH": "/opt/airflow"},
+    salary_load = BashOperator(
+        task_id="salary_load",
+        bash_command=bash("src.load.load_salary"),
     )
 
-    # 4) Upsert players dimension (canonical)
-    upsert_players = BashOperator(
-        task_id="upsert_dim_players",
-        bash_command=_py("src.load.upsert_players"),
-        env={"PYTHONPATH": "/opt/airflow"},
+    stats_load = BashOperator(
+        task_id="stats_load",
+        bash_command=bash("src.load.load_stats"),
     )
 
-    # 5) Map Spotrac names -> MLBAM player_id bridge
-    map_spotrac = BashOperator(
-        task_id="map_spotrac_to_mlbam",
-        bash_command=_py("src.load.map_spotrac"),
-        env={"PYTHONPATH": "/opt/airflow"},
-    )
-
-    # 6) Load salary fact (keyed by player_id)
-    load_salary = BashOperator(
-        task_id="load_fact_salary",
-        bash_command=_py("src.load.load_salary"),
-        env={"PYTHONPATH": "/opt/airflow"},
-    )
-
-    # 7) Load stats fact (keyed by player_id)
-    load_stats = BashOperator(
-        task_id="load_fact_player_stats",
-        bash_command=_py("src.load.load_stats"),
-        env={"PYTHONPATH": "/opt/airflow"},
-    )
-
-    # 8) Run DQ gate (fail-fast)
+    # Fail-fast gate: src.dq.checks must exit(1) on threshold breach.
     dq_gate = BashOperator(
         task_id="dq_gate",
-        bash_command=_py("src.dq.checks"),
-        env={"PYTHONPATH": "/opt/airflow"},
+        bash_command=bash("src.dq.checks"),
     )
 
-    # Flow
-    init_db >> [extract_mlb, extract_spotrac] >> upsert_players
-    upsert_players >> map_spotrac >> load_salary
-    upsert_players >> load_stats
-    [load_salary, load_stats] >> dq_gate
+    init_db >> roster_sync >> salary_load >> stats_load >> dq_gate

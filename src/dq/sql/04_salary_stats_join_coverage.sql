@@ -1,18 +1,22 @@
-WITH joined AS (
-  SELECT
-    f.player_id,
-    f.season,
-    CASE WHEN s.player_id IS NULL THEN 0 ELSE 1 END AS has_stats
-  FROM fact_salary f
-  LEFT JOIN fact_player_stats s
-    ON s.player_id = f.player_id
-   AND s.season = f.season
+WITH s AS (
+  SELECT MAX(created_at) AS max_ts
+  FROM public.fact_salary
+),
+p AS (
+  SELECT MAX(created_at) AS max_ts
+  FROM public.fact_player_stats
+),
+unioned AS (
+  SELECT 'fact_salary' AS table_name, max_ts FROM s
+  UNION ALL
+  SELECT 'fact_player_stats' AS table_name, max_ts FROM p
 )
 SELECT
-  season,
-  COUNT(*) AS salary_rows,
-  SUM(has_stats) AS matched_rows,
-  ROUND((SUM(has_stats)::numeric / NULLIF(COUNT(*), 0)) * 100, 2) AS join_pct
-FROM joined
-GROUP BY season
-ORDER BY season;
+  'max_freshness_lag_hours' AS metric_name,
+  COALESCE(
+    MAX(
+      EXTRACT(EPOCH FROM (NOW() - max_ts)) / 3600.0
+    ),
+    999999
+  ) AS metric_value
+FROM unioned;

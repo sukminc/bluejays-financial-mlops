@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from src.db.models import FactPlayerStats
 from src.db.session import get_session
@@ -37,17 +37,17 @@ class StatsRecord:
     player_id: int
     snapshot_date: date
 
-    team_abbr: Optional[str] = None
+    team_abbr: str | None = None
 
-    games: Optional[int] = None
+    games: int | None = None
 
-    pa: Optional[int] = None
-    ops: Optional[Decimal] = None
+    pa: int | None = None
+    ops: Decimal | None = None
 
-    ip: Optional[Decimal] = None
-    era: Optional[Decimal] = None
+    ip: Decimal | None = None
+    era: Decimal | None = None
 
-    war: Optional[Decimal] = None
+    war: Decimal | None = None
 
 
 def _parse_date(value: Any) -> date:
@@ -59,7 +59,7 @@ def _parse_date(value: Any) -> date:
     raise ValueError("snapshot_date must be a YYYY-MM-DD string")
 
 
-def _to_int(value: Any) -> Optional[int]:
+def _to_int(value: Any) -> int | None:
     """Convert value to int when possible."""
     if value is None or value == "":
         return None
@@ -69,7 +69,7 @@ def _to_int(value: Any) -> Optional[int]:
         return None
 
 
-def _to_decimal(value: Any) -> Optional[Decimal]:
+def _to_decimal(value: Any) -> Decimal | None:
     """Convert value to Decimal when possible."""
     if value is None or value == "":
         return None
@@ -79,17 +79,16 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def _validate_required(obj: Dict[str, Any]) -> None:
+def _validate_required(obj: dict[str, Any]) -> None:
     """Validate required keys for stats records."""
-    missing = [k for k in (
-        "season", "player_id", "snapshot_date"
-        ) if k not in obj]
+    required = ("season", "player_id", "snapshot_date")
+    missing = [k for k in required if k not in obj]
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"Missing required field(s): {joined}")
 
 
-def _to_stats_record(obj: Dict[str, Any]) -> StatsRecord:
+def _to_stats_record(obj: dict[str, Any]) -> StatsRecord:
     """Convert a dict into StatsRecord with basic validation."""
     _validate_required(obj)
 
@@ -121,7 +120,7 @@ def load_stats_from_json(path: str | Path) -> int:
     if not isinstance(payload, list):
         raise ValueError("Expected a JSON array of stats objects")
 
-    records: Iterable[StatsRecord] = (_to_stats_record(row) for row in payload)
+    records = (_to_stats_record(row) for row in payload)
     count = 0
 
     with get_session() as session:
@@ -140,5 +139,45 @@ def load_stats_from_json(path: str | Path) -> int:
             )
             session.merge(row)
             count += 1
+        session.commit()
 
     return count
+
+
+def main() -> None:
+    """CLI entrypoint for Airflow BashOperator."""
+    import argparse
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description="Load player stats JSON into Postgres (fact_player_stats)."
+    )
+    parser.add_argument(
+        "--input",
+        default=os.environ.get(
+            "STATS_INPUT",
+            "/opt/airflow/data/stats/player_stats.json",
+        ),
+        help=(
+            "Path to stats JSON file. "
+            "Can also be set via STATS_INPUT env var. "
+            "Default: /opt/airflow/data/stats/player_stats.json"
+        ),
+    )
+    args = parser.parse_args()
+
+    processed = load_stats_from_json(args.input)
+    print(
+        f"fact_player_stats load complete. "
+        f"processed={processed}"
+    )
+
+    # Fail fast if nothing was loaded; avoids 'green but empty' pipelines.
+    if processed == 0:
+        print("No stats records processed; failing task.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

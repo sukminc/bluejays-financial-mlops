@@ -1,15 +1,8 @@
-SELECT
-  'fact_salary' AS table_name,
-  season,
-  COUNT(*) AS row_count
+SELECT 'dim_players' AS table_name, COUNT(*)::bigint AS row_count
+FROM dim_players
+UNION ALL
+SELECT 'fact_salary' AS table_name, COUNT(*)::bigint AS row_count
 FROM fact_salary
-GROUP BY season
-ORDER BY season;
-
-SELECT
-  'fact_player_stats' AS table_name,
-  season,
-  COUNT(*) AS row_count
-FROM fact_player_stats
-GROUP BY season
-ORDER BY season;
+UNION ALL
+SELECT 'fact_player_stats' AS table_name, COUNT(*)::bigint AS row_count
+FROM fact_player_stats;
