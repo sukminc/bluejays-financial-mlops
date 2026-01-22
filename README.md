@@ -17,6 +17,13 @@ While many sports analytics projects focus solely on modeling, **Blue Jays Money
 
 This system treats data engineering with **SDET principles**, enforcing strict quality gates to ensure that no data downstream is used for forecasting unless it is proven correct.
 
+## 🔄 Recent Evolution (What Changed)
+
+- Transitioned from mock/manual data loaders to fully API-driven, scheduler-based ETL workflows.
+- Established explicit Extract and Load separation within Airflow DAGs to improve modularity and traceability.
+- Introduced SQL-based Data Quality checks as first-class artifacts, integrated directly into the orchestration layer.
+- Shifted from exploratory, ad-hoc scripts to a portfolio-grade, auditable pipeline framework with strong governance.
+
 ---
 
 ## 🎯 Key Objectives
@@ -61,6 +68,8 @@ graph TD
 ## 🛡️ Data Quality Gate (Core Feature)
 
 Before any data is promoted to the analytics layer, the **DQ Gate** enforces four strict pillars of integrity. If *any* check fails, the pipeline halts to prevent contamination.
+
+These Data Quality checks are implemented as SQL snapshots executed immediately after data loading completes. Failures in these checks are designed to block all downstream simulation and modeling processes, ensuring that no analytics consume corrupted or incomplete data.
 
 | Check | Description |
 | --- | --- |
@@ -153,8 +162,9 @@ docker-compose up -d
 | Phase | Focus | Status |
 | --- | --- | --- |
 | **Phase 1** | **Canonical ETL + DQ Gate** (Entity Resolution, Deterministic Joins) | ✅ **Complete** |
-| **Phase 2** | **"What-If" Simulation Engine** (Roster Trades, Signings) | ⏳ Planned |
-| **Phase 3** | **MLOps & Forecasting** (Salary Arbitration Predictions) | ⏳ Planned |
+| **Phase 2** | **Simulation Engine:** Implement explicit CBT scenarios including add/drop/trade operations, develop salary aggregation logic, and enable deterministic recomputation for roster changes. | ⏳ Planned |
+| **Phase 3** | **Predictive Layer:** Build optional downstream forecasting models gated strictly on passing Data Quality checks, ensuring no predictions are made on unverified data. | ⏳ Planned |
+| **Phase 4** | **Observability & Regression:** Establish Data Quality history tables, create trend dashboards for monitoring data health over time, and implement regression DAGs to detect and alert on pipeline degradations. | ⏳ Planned |
 
 ---
 
@@ -167,6 +177,8 @@ Specializing in **ETL Validation**, **Data Integrity**, and **Automation-First Q
 
 > **Note:** This repository intentionally prioritizes data correctness over analytics output. Every future model or forecast depends on this foundation—and this project proves that foundation is solid.
 
-```
+---
 
-```
+## 🧭 Project Direction & Portfolio Intent
+
+This project is fundamentally a **Data Quality Assurance and ETL portfolio initiative**, not a sports analytics demonstration. The primary focus is on correctness, reproducibility, and explicit failure visibility throughout the pipeline. This approach reflects real-world enterprise data platforms commonly found in finance and regulated industries, where data integrity and auditability are paramount.
