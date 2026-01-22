@@ -1,44 +1,72 @@
+
+import os
+from typing import Any, Dict, List
+
 import requests
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from src.models import DimPlayer
 
-# DB URL targeting the internal Docker service 'postgres'
-DB_URL = "postgresql://airflow:airflow@postgres:5432/airflow"
-engine = create_engine(DB_URL)
-Session = sessionmaker(bind=engine)
+from src.db.session import SessionLocal
+from src.db.models import DimPlayer
 
 
-def fetch_roster(team_id=141):
+DEFAULT_TEAM_ID = 141  # Toronto Blue Jays
+DEFAULT_TIMEOUT_SECS = 15
+
+
+def fetch_roster(team_id: int = DEFAULT_TEAM_ID) -> List[Dict[str, Any]]:
     url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster"
-    response = requests.get(url)
-    return response.json().get('roster', [])
+    resp = requests.get(url, timeout=DEFAULT_TIMEOUT_SECS)
+    resp.raise_for_status()
+    return resp.json().get("roster", [])
 
 
-def load_roster_to_dw():
-    session = Session()
+def load_roster_to_dw(team_id: int = DEFAULT_TEAM_ID) -> int:
+    """Upsert Blue Jays roster into dim_players.
+
+    Returns:
+        int: number of inserted rows (new players).
+    """
+    inserted = 0
+    session = SessionLocal()
     try:
-        roster = fetch_roster()
+        roster = fetch_roster(team_id=team_id)
         for entry in roster:
-            p_info = entry['person']
-            p_id = p_info['id']
-            # Fixed "Line Too Long" using multi-line chaining
-            player = (
+            person = entry.get("person") or {}
+            player_id = person.get("id")
+            full_name = person.get("fullName")
+            position = (entry.get("position") or {}).get("abbreviation")
+
+            if not player_id or not full_name:
+                continue
+
+            existing = (
                 session.query(DimPlayer)
-                .filter_by(player_id=p_id)
+                .filter(DimPlayer.player_id == int(player_id))
                 .first()
             )
-            if not player:
-                new_player = DimPlayer(
-                    player_id=p_id,
-                    name_display_first_last=p_info['fullName'],
-                    primary_position=entry['position']['abbreviation']
+
+            if existing is None:
+                session.add(
+                    DimPlayer(
+                        player_id=int(player_id),
+                        name_display_first_last=str(full_name),
+                        primary_position=str(position) if position else None,
+                    )
                 )
-                session.add(new_player)
+                inserted += 1
+            else:
+                # Keep roster sync idempotent; update name/position if changed.
+                existing.name_display_first_last = str(full_name)
+                existing.primary_position = (
+                    str(position) if position else existing.primary_position
+                )
+
         session.commit()
+        return inserted
     finally:
         session.close()
 
 
 if __name__ == "__main__":
-    load_roster_to_dw()
+    team_id = int(os.getenv("MLB_TEAM_ID", str(DEFAULT_TEAM_ID)))
+    count = load_roster_to_dw(team_id=team_id)
+    print(f"dim_players roster sync complete. inserted={count}")

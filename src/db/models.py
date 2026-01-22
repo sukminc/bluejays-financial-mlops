@@ -33,28 +33,25 @@ Base = declarative_base()
 
 
 class DimPlayer(Base):
-    """Player dimension table (canonical MLBAM player key)."""
+    """Player dimension table (canonical MLBAM player key).
+
+    NOTE:
+    - Current DB schema uses `name_display_first_last`.
+    - Keep the Python attribute name as `full_name` for canonical joins.
+    """
 
     __tablename__ = "dim_players"
 
     player_id = Column(Integer, primary_key=True)  # MLBAM player id
-    full_name = Column(Text, nullable=False)
 
-    first_name = Column(Text, nullable=True)
-    last_name = Column(Text, nullable=True)
+    # DB column is `name_display_first_last`; expose as `full_name` in Python.
+    full_name = Column("name_display_first_last", Text, nullable=False)
 
     bats = Column(String(8), nullable=True)
     throws = Column(String(8), nullable=True)
     primary_position = Column(String(16), nullable=True)
 
     birth_date = Column(Date, nullable=True)
-    mlb_debut_date = Column(Date, nullable=True)
-
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
 
     # Relationships
     salaries = relationship("FactSalary", back_populates="player")
@@ -91,8 +88,8 @@ class BridgeSpotracPlayerMap(Base):
     confidence_score = Column(
         Numeric(5, 2),
         nullable=False,
-        server_default="0"
-        )
+        server_default="0",
+    )
     match_method = Column(String(32), nullable=False)
     # exact_name, fuzzy, manual_override
 
@@ -180,7 +177,8 @@ class IngestRun(Base):
 
     __tablename__ = "ingest_runs"
 
-    run_id = Column(Text, primary_key=True)  # Airflow run_id or a custom id
+    # Airflow run_id or a custom id
+    run_id = Column(Text, primary_key=True)
     dag_id = Column(Text, nullable=True)
     task_id = Column(Text, nullable=True)
 
