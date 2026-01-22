@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![Airflow](https://img.shields.io/badge/Apache%20Airflow-2.10%2B-orange)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Fact%2FDim-blue)
-![Status](https://img.shields.io/badge/Phase--1-Data%20Integrity%20Verified-green)
+![Status](https://img.shields.io/badge/v2%20Baseline-ETL%2BD%20Q%20Gate%20Passing-green)
 ![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen)
 
 ## 📌 Project Overview
@@ -19,10 +19,10 @@ This system treats data engineering with **SDET principles**, enforcing strict q
 
 ## 🔄 Recent Evolution (What Changed)
 
-- Transitioned from mock/manual data loaders to fully API-driven, scheduler-based ETL workflows.
-- Established explicit Extract and Load separation within Airflow DAGs to improve modularity and traceability.
-- Introduced SQL-based Data Quality checks as first-class artifacts, integrated directly into the orchestration layer.
-- Shifted from exploratory, ad-hoc scripts to a portfolio-grade, auditable pipeline framework with strong governance.
+- Consolidation into a single production-grade baseline DAG using BashOperator.
+- CLI-reproducible execution via `PYTHONPATH=/opt/airflow python -m src...`.
+- End-to-end DQ Gate now actively blocking bad data (fail-fast).
+- Player stats ingestion via MLB Stats API producing snapshot-based facts.
 
 ---
 
@@ -37,23 +37,16 @@ This system treats data engineering with **SDET principles**, enforcing strict q
 
 ## 🏗 Architecture & Data Flow
 
-This project implements a **Extract → Map → Load → Verify** pattern to ensure integrity.
+This project implements a **Extract → Load → Verify** pattern to ensure integrity.
 
 ```mermaid
 graph TD
-    A[Spotrac Web] -->|Playwright Scraper| B(Raw Payroll JSON)
-    C[MLB Stats API] -->|API Client| D(Raw Stats)
+    A[MLB Stats API] -->|player_stats_api| B[fact_player_stats]
+    C[Spotrac] -->|load_salary| D[fact_salary]
     
-    B --> E{Name Resolution Bridge}
-    E -->|Map to MLBAM ID| F[fact_salary]
-    D -->|Direct Load| G[fact_player_stats]
-    
-    F --> H[DQ Gate]
-    G --> H
-    
-    H -->|Pass| I[Analytics Ready]
-    H -->|Fail| J[Pipeline Stop / Alert]
-
+    B --> E[DQ Gate]
+    D --> E
+    F[dim_players] --> E
 ```
 
 ### 🧱 Canonical Data Model (Star Schema)
@@ -67,16 +60,19 @@ graph TD
 
 ## 🛡️ Data Quality Gate (Core Feature)
 
-Before any data is promoted to the analytics layer, the **DQ Gate** enforces four strict pillars of integrity. If *any* check fails, the pipeline halts to prevent contamination.
+Before any data is promoted to the analytics layer, the **DQ Gate** enforces five strict pillars of integrity. If *any* check fails, the pipeline halts to prevent contamination.
 
 These Data Quality checks are implemented as SQL snapshots executed immediately after data loading completes. Failures in these checks are designed to block all downstream simulation and modeling processes, ensuring that no analytics consume corrupted or incomplete data.
 
 | Check | Description |
 | --- | --- |
-| **1. Join Coverage** | Verifies 100% of `fact_salary` rows map to valid entries in `dim_players` and `fact_player_stats`. |
-| **2. Null Integrity** | Enforces that critical keys (like `player_id`) are never `NULL` in fact tables. |
-| **3. Duplicate Detection** | Scans for primary key violations (e.g., duplicate `season` + `player_id` entries per snapshot). |
-| **4. Snapshot Drift** | Monitors row counts against previous snapshots to detect sudden data loss (Drift > Threshold). |
+| **Rowcount Snapshot** | Validates expected row counts per snapshot to detect data loss or anomalies. |
+| **PK Duplicate Check (fact_salary)** | Detects duplicate primary keys in the salary fact table. |
+| **Null Integrity (fact tables)** | Ensures critical columns like `player_id` are never `NULL`. |
+| **Salary ↔ Stats Join Coverage** | Confirms 100% join coverage between salary and stats fact tables. |
+| **Freshness / Load Window** | Verifies data freshness and that loads occur within expected time windows. |
+
+All checks are enforced via SQL snapshots executed by `src/dq/checks.py` and will fail the DAG on violation.
 
 ---
 
@@ -85,7 +81,6 @@ These Data Quality checks are implemented as SQL snapshots executed immediately 
 * **Language:** Python 3.12+
 * **Orchestration:** Apache Airflow 2.10+
 * **Database:** PostgreSQL (Star Schema)
-* **Scraping:** Playwright (Chromium, Dockerized)
 * **ORM:** SQLAlchemy
 * **Infrastructure:** Docker, Docker Compose
 * **Quality Assurance:** Flake8, Pytest, Custom DQ Framework
@@ -97,25 +92,23 @@ These Data Quality checks are implemented as SQL snapshots executed immediately 
 ```text
 bluejays-financial-mlops/
 ├── dags/
-│   ├── payroll_etl_dag.py       # Main Airflow DAG defining the workflow
-│   └── bluejays_pipeline.py     # Pipeline orchestration logic
+│   └── bluejays_financial_mlops_v2.py    # Single baseline DAG using BashOperator
 ├── src/
 │   ├── db/
-│   │   ├── session.py           # Database engine & session management
-│   │   └── models.py            # SQLAlchemy schemas (Dim/Fact/Bridge)
+│   │   ├── session.py                     # Database engine & session management
+│   │   └── models.py                      # SQLAlchemy schemas (Dim/Fact/Bridge)
 │   ├── extract/
-│   │   ├── spotrac.py           # Playwright-based Spotrac scraper
-│   │   └── mlb_stats_api.py     # MLB Stats API ingestion module
+│   │   └── player_stats_api.py            # MLB Stats API ingestion module
 │   ├── load/
-│   │   ├── map_spotrac.py       # Name resolution logic (The Bridge)
-│   │   ├── load_salary.py       # Loader for fact_salary
-│   │   └── load_stats.py        # Loader for fact_player_stats
+│   │   ├── map_spotrac.py                 # Name resolution logic (The Bridge)
+│   │   ├── load_salary.py                 # Loader for fact_salary
+│   │   └── load_stats.py                  # Loader for fact_player_stats
 │   └── dq/
-│       └── checks.py            # The Data Quality Gate logic
-├── docker-compose.yaml          # Infrastructure definition
-├── Dockerfile.airflow           # Custom Airflow image with Playwright
-├── requirements.txt             # Python dependencies
-└── tests/                       # Unit and Integration tests
+│       └── checks.py                      # The Data Quality Gate logic
+├── docker-compose.yaml                    # Infrastructure definition
+├── Dockerfile.airflow                     # Custom Airflow image with Playwright
+├── requirements.txt                       # Python dependencies
+└── tests/                                # Unit and Integration tests
 
 ```
 
@@ -147,13 +140,17 @@ docker-compose up -d
 ### 3. Trigger the Pipeline
 
 1. Navigate to the Airflow UI.
-2. Enable and trigger the **`bluejays_payroll_pipeline`** DAG.
+2. Enable and trigger the **`bluejays_financial_mlops_v2`** DAG.
 3. Watch the graph execute:
-* **Extract:** Scrape Spotrac & call MLB API.
-* **Transform/Load:** Resolve identities and populate facts.
+* **Extract:** Ingest player stats and salary data.
+* **Load:** Populate fact tables.
 * **Verify:** Execute the DQ Gate (Green = Pass, Red = Block).
 
+You may also run the Data Quality Gate checks directly via CLI for testing:
 
+```bash
+PYTHONPATH=/opt/airflow python -m src.dq.checks
+```
 
 ---
 
@@ -161,8 +158,8 @@ docker-compose up -d
 
 | Phase | Focus | Status |
 | --- | --- | --- |
-| **Phase 1** | **Canonical ETL + DQ Gate** (Entity Resolution, Deterministic Joins) | ✅ **Complete** |
-| **Phase 2** | **Simulation Engine:** Implement explicit CBT scenarios including add/drop/trade operations, develop salary aggregation logic, and enable deterministic recomputation for roster changes. | ⏳ Planned |
+| **Phase 1** | **v2 Baseline Complete** (Single DAG, DQ Gate Passing) | ✅ Complete |
+| **Phase 2** | **CBT / Luxury Tax Simulation (What-if Engine)** | ⏳ Planned |
 | **Phase 3** | **Predictive Layer:** Build optional downstream forecasting models gated strictly on passing Data Quality checks, ensuring no predictions are made on unverified data. | ⏳ Planned |
 | **Phase 4** | **Observability & Regression:** Establish Data Quality history tables, create trend dashboards for monitoring data health over time, and implement regression DAGs to detect and alert on pipeline degradations. | ⏳ Planned |
 
