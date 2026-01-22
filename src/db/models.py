@@ -15,6 +15,7 @@ Notes:
 from __future__ import annotations
 
 from sqlalchemy import (
+    Column,
     Date,
     DateTime,
     ForeignKey,
@@ -36,38 +37,32 @@ class DimPlayer(Base):
 
     __tablename__ = "dim_players"
 
-    player_id = Integer(primary_key=True)  # MLBAM player id
-    full_name = Text(nullable=False)
+    player_id = Column(Integer, primary_key=True)  # MLBAM player id
+    full_name = Column(Text, nullable=False)
 
-    first_name = Text(nullable=True)
-    last_name = Text(nullable=True)
+    first_name = Column(Text, nullable=True)
+    last_name = Column(Text, nullable=True)
 
-    bats = String(8, nullable=True)
-    throws = String(8, nullable=True)
-    primary_position = String(16, nullable=True)
+    bats = Column(String(8), nullable=True)
+    throws = Column(String(8), nullable=True)
+    primary_position = Column(String(16), nullable=True)
 
-    birth_date = Date(nullable=True)
-    mlb_debut_date = Date(nullable=True)
+    birth_date = Column(Date, nullable=True)
+    mlb_debut_date = Column(Date, nullable=True)
 
-    updated_at = DateTime(
-        timezone=True,
+    updated_at = Column(
+        DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
     )
 
     # Relationships
-    salaries = relationship(
-        "FactSalary",
-        back_populates="player"
-        )
-    stats = relationship(
-        "FactPlayerStats",
-        back_populates="player"
-        )
+    salaries = relationship("FactSalary", back_populates="player")
+    stats = relationship("FactPlayerStats", back_populates="player")
     spotrac_maps = relationship(
         "BridgeSpotracPlayerMap",
-        back_populates="player"
-        )
+        back_populates="player",
+    )
 
 
 class BridgeSpotracPlayerMap(Base):
@@ -80,25 +75,30 @@ class BridgeSpotracPlayerMap(Base):
 
     # A deterministic key derived from a Spotrac raw record.
     # Example: normalized name + team + position.
-    spotrac_player_key = Text(primary_key=True)
+    spotrac_player_key = Column(Text, primary_key=True)
 
-    player_id = Integer(
+    player_id = Column(
+        Integer,
         ForeignKey("dim_players.player_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    spotrac_name_raw = Text(nullable=False)
-    team_abbr = String(8, nullable=True)
-    position = String(16, nullable=True)
+    spotrac_name_raw = Column(Text, nullable=False)
+    team_abbr = Column(String(8), nullable=True)
+    position = Column(String(16), nullable=True)
 
-    confidence_score = Numeric(5, 2, nullable=False, server_default="0")
-    match_method = String(32, nullable=False)
+    confidence_score = Column(
+        Numeric(5, 2),
+        nullable=False,
+        server_default="0"
+        )
+    match_method = Column(String(32), nullable=False)
     # exact_name, fuzzy, manual_override
 
-    created_at = DateTime(timezone=True, server_default=func.now())
-    updated_at = DateTime(
-        timezone=True,
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
     )
@@ -111,22 +111,23 @@ class FactSalary(Base):
 
     __tablename__ = "fact_salary"
 
-    season = Integer(primary_key=True)
-    player_id = Integer(
+    season = Column(Integer, primary_key=True)
+    player_id = Column(
+        Integer,
         ForeignKey("dim_players.player_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    snapshot_date = Date(primary_key=True)
+    snapshot_date = Column(Date, primary_key=True)
 
-    team_abbr = String(8, nullable=True)
+    team_abbr = Column(String(8), nullable=True)
 
-    salary_usd = Numeric(14, 2, nullable=True)
-    aav_usd = Numeric(14, 2, nullable=True)
+    salary_usd = Column(Numeric(14, 2), nullable=True)
+    aav_usd = Column(Numeric(14, 2), nullable=True)
 
-    contract_type = String(64, nullable=True)
-    source = String(32, nullable=False, server_default="spotrac")
+    contract_type = Column(String(64), nullable=True)
+    source = Column(String(32), nullable=False, server_default="spotrac")
 
-    created_at = DateTime(timezone=True, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     player = relationship("DimPlayer", back_populates="salaries")
 
@@ -140,31 +141,32 @@ class FactPlayerStats(Base):
 
     __tablename__ = "fact_player_stats"
 
-    season = Integer(primary_key=True)
-    player_id = Integer(
+    season = Column(Integer, primary_key=True)
+    player_id = Column(
+        Integer,
         ForeignKey("dim_players.player_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    snapshot_date = Date(primary_key=True)
+    snapshot_date = Column(Date, primary_key=True)
 
-    team_abbr = String(8, nullable=True)
+    team_abbr = Column(String(8), nullable=True)
 
     # Keep MVP stats minimal; expand as needed.
-    games = Integer(nullable=True)
+    games = Column(Integer, nullable=True)
 
     # Hitting
-    pa = Integer(nullable=True)
-    ops = Numeric(6, 3, nullable=True)
+    pa = Column(Integer, nullable=True)
+    ops = Column(Numeric(6, 3), nullable=True)
 
     # Pitching
-    ip = Numeric(6, 1, nullable=True)
-    era = Numeric(6, 3, nullable=True)
+    ip = Column(Numeric(6, 1), nullable=True)
+    era = Column(Numeric(6, 3), nullable=True)
 
     # Advanced (optional; depends on the chosen source)
-    war = Numeric(6, 3, nullable=True)
+    war = Column(Numeric(6, 3), nullable=True)
 
-    source = String(32, nullable=False, server_default="mlb_stats_api")
-    created_at = DateTime(timezone=True, server_default=func.now())
+    source = Column(String(32), nullable=False, server_default="mlb_stats_api")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     player = relationship("DimPlayer", back_populates="stats")
 
@@ -178,19 +180,19 @@ class IngestRun(Base):
 
     __tablename__ = "ingest_runs"
 
-    run_id = Text(primary_key=True)  # Airflow run_id or a custom id
-    dag_id = Text(nullable=True)
-    task_id = Text(nullable=True)
+    run_id = Column(Text, primary_key=True)  # Airflow run_id or a custom id
+    dag_id = Column(Text, nullable=True)
+    task_id = Column(Text, nullable=True)
 
-    source = String(32, nullable=False)
+    source = Column(String(32), nullable=False)
     # spotrac, mlb_stats_api
-    snapshot_date = Date(nullable=False)
+    snapshot_date = Column(Date, nullable=False)
 
-    raw_path = Text(nullable=True)
-    row_count = Integer(nullable=True)
+    raw_path = Column(Text, nullable=True)
+    row_count = Column(Integer, nullable=True)
 
-    status = String(16, nullable=False, server_default="ok")
-    created_at = DateTime(timezone=True, server_default=func.now())
+    status = Column(String(16), nullable=False, server_default="ok")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint(

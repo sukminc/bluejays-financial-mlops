@@ -162,6 +162,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
+    hostname: airflow-worker
     command: celery worker
     shm_size: '2gb'  # <--- THIS IS THE CRITICAL FIX
     healthcheck:

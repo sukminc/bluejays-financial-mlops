@@ -1,79 +1,130 @@
-import sys
-from datetime import timedelta
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.utils.dates import days_ago
+"""SQLAlchemy ORM models.
 
-# -------------------------------------------------------------------------
-# SYSTEM PATH CONFIGURATION
-# -------------------------------------------------------------------------
-# Ensure Airflow can see the 'src' package.
-PROJECT_ROOT = "/opt/airflow"
-if PROJECT_ROOT not in sys.path:
-    sys.path.append(PROJECT_ROOT)
+Notes:
+- Keep the schema simple and stable for Airflow + Docker execution.
+- Use explicit Column(...) declarations (do not call
+  Integer(primary_key=True)).
+"""
 
+from __future__ import annotations
 
-# -------------------------------------------------------------------------
-# RUNTIME IMPORT WRAPPERS
-# -------------------------------------------------------------------------
-def fetch_spotrac_payroll_task(**context):
-    """
-    Runtime wrapper for the Spotrac scraper.
+from datetime import date
 
-    Why this is needed:
-    1. Prevents Top-Level Code errors during DAG parsing.
-    2. Allows the Scheduler to parse the DAG even if Playwright
-       browsers aren't installed in the Scheduler container.
-    """
-    try:
-        # Import strictly from the new architectural path
-        from src.extract.spotrac import fetch_spotrac_payroll
-
-        # Execute the function
-        output_path = fetch_spotrac_payroll()
-
-        # Log success for Airflow UI
-        print(f"Extraction successful. Data saved to: {output_path}")
-        return output_path
-
-    except ImportError as e:
-        raise ImportError(
-            f"Failed to import 'src.extract.spotrac'. "
-            f"Current sys.path: {sys.path}. Error: {e}"
-        )
+from sqlalchemy import BigInteger
+from sqlalchemy import Column
+from sqlalchemy import Date
+from sqlalchemy import Float
+from sqlalchemy import ForeignKey
+from sqlalchemy import Integer
+from sqlalchemy import String
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import relationship
 
 
-# -------------------------------------------------------------------------
-# DAG DEFINITION
-# -------------------------------------------------------------------------
-default_args = {
-    'owner': 'Chris Yoon',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 2,
-    # Retry twice if the scraper fails (e.g., network blip)
-    'retry_delay': timedelta(minutes=2),
-}
+Base = declarative_base()
 
-with DAG(
-    'bluejays_payroll_pipeline',
-    default_args=default_args,
-    description='ETL: Scrape Spotrac Payroll -> Raw Data Layer',
-    schedule_interval='@daily',      # Run once daily
-    start_date=days_ago(1),
-    catchup=False,
-    tags=['bluejays', 'etl', 'playwright', 'phase1'],
-) as dag:
 
-    # Task 1: Extract Data (Playwright Scraper)
-    extract_task = PythonOperator(
-        task_id='extract_spotrac_data',
-        python_callable=fetch_spotrac_payroll_task,
+class DimPlayer(Base):
+    """Canonical player dimension keyed by MLBAM player_id."""
+
+    __tablename__ = "dim_players"
+
+    # MLBAM player id
+    player_id = Column(Integer, primary_key=True)
+    full_name = Column(String(200), nullable=False)
+    first_name = Column(String(100), nullable=True)
+    last_name = Column(String(100), nullable=True)
+    team_id = Column(Integer, nullable=True)
+    team_name = Column(String(100), nullable=True)
+    primary_position = Column(String(50), nullable=True)
+    bats = Column(String(5), nullable=True)
+    throws = Column(String(5), nullable=True)
+
+    salaries = relationship("FactSalary", back_populates="player")
+    stats = relationship("FactPlayerStats", back_populates="player")
+
+
+class SpotracPlayerMap(Base):
+    """Bridge table to map Spotrac display name -> MLBAM player_id."""
+
+    __tablename__ = "bridge_spotrac_player_map"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    spotrac_name = Column(String(200), nullable=False)
+    player_id = Column(
+        Integer,
+        ForeignKey("dim_players.player_id"),
+        nullable=False,
+    )
+    season = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "spotrac_name",
+            "season",
+            name="uq_spotrac_name_season",
+        ),
     )
 
-    # Future Phase 2 Tasks (Transformation & Loading)
-    # transform_task = ...
-    # load_task = ...
+    player = relationship("DimPlayer")
 
-    # extract_task >> transform_task >> load_task
+
+class FactSalary(Base):
+    """Salary fact table keyed by (player_id, season)."""
+
+    __tablename__ = "fact_salary"
+
+    salary_id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(
+        Integer,
+        ForeignKey("dim_players.player_id"),
+        nullable=False,
+    )
+    season = Column(Integer, nullable=False)
+    base_salary = Column(BigInteger, nullable=True)
+    luxury_tax_salary = Column(BigInteger, nullable=True)
+    source = Column(String(50), nullable=False, default="spotrac")
+    snapshot_date = Column(Date, nullable=False, default=date.today)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_id",
+            "season",
+            name="uq_fact_salary_player_season",
+        ),
+    )
+
+    player = relationship("DimPlayer", back_populates="salaries")
+
+
+class FactPlayerStats(Base):
+    """Player performance stats fact table keyed by (player_id, season).
+
+    Keep this minimal for MVP; extend as needed.
+    """
+
+    __tablename__ = "fact_player_stats"
+
+    stats_id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(
+        Integer,
+        ForeignKey("dim_players.player_id"),
+        nullable=False,
+    )
+    season = Column(Integer, nullable=False)
+
+    # Example metric(s). Add more columns later once the API payload is stable.
+    war = Column(Float, nullable=True)
+
+    snapshot_date = Column(Date, nullable=False, default=date.today)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_id",
+            "season",
+            name="uq_fact_stats_player_season",
+        ),
+    )
+
+    player = relationship("DimPlayer", back_populates="stats")
