@@ -1,202 +1,201 @@
-"""SQLAlchemy ORM models for the Blue Jays financial data platform.
+"""Load manual Spotrac Blue Jays salary CSV into a raw staging table.
 
-Design goals:
-- Use MLBAM `player_id` as the canonical join key.
-- Separate salary facts from performance stats facts.
-- Support snapshot-based ingestion (reproducible, auditable runs).
-- Provide a bridging table to map Spotrac (name-based) records
-  to MLBAM ids.
+Goal (portfolio-friendly):
+- Keep the pipeline simple and reliable.
+- Treat the CSV as the source of truth that you maintain manually.
+- Load the CSV into Postgres as-is (TEXT columns) for later refinement into
+  silver/gold layers.
 
-Notes:
-- This file defines schema only.
-  Connection/session logic belongs in `src/db/session.py`.
+This module intentionally avoids:
+- name-to-player_id matching
+- strict type casting
+- complex exception handling
+
+Table target (created if missing):
+public.stg_spotrac_bluejays_salary_raw
+
+Expected CSV header columns:
+- season
+- player_name
+- position
+- age
+- contract_type
+- luxury_tax_usd
+- luxury_tax_pct
+- cash_salary_usd
+- free_agent_year
+
+All columns are stored as TEXT; `raw_loaded_at` is assigned by the DB.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import (
-    Column,
-    Date,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    Numeric,
-    String,
-    Text,
-    UniqueConstraint,
-    func,
+import csv
+import sys
+from pathlib import Path
+
+from sqlalchemy import create_engine, text
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+DEFAULT_DB_URL = "postgresql+psycopg2://airflow:airflow@postgres:5432/airflow"
+DEFAULT_INPUT = "/opt/airflow/data/raw/manual/spotrac_bluejays_2025.csv"
+TARGET_TABLE = "public.stg_spotrac_bluejays_salary_raw"
+
+CSV_COLUMNS = (
+    "season",
+    "player_name",
+    "position",
+    "age",
+    "contract_type",
+    "luxury_tax_usd",
+    "luxury_tax_pct",
+    "cash_salary_usd",
+    "free_agent_year",
 )
-from sqlalchemy.orm import declarative_base, relationship
-
-Base = declarative_base()
 
 
-class DimPlayer(Base):
-    """Player dimension table (canonical MLBAM player key).
-
-    NOTE:
-    - Current DB schema uses `name_display_first_last`.
-    - Keep the Python attribute name as `full_name` for canonical joins.
+def _ensure_table(engine) -> None:
+    ddl = f"""
+    CREATE TABLE IF NOT EXISTS {TARGET_TABLE} (
+      season TEXT,
+      player_name TEXT,
+      position TEXT,
+      age TEXT,
+      contract_type TEXT,
+      luxury_tax_usd TEXT,
+      luxury_tax_pct TEXT,
+      cash_salary_usd TEXT,
+      free_agent_year TEXT,
+      raw_loaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     """
-
-    __tablename__ = "dim_players"
-
-    player_id = Column(Integer, primary_key=True)  # MLBAM player id
-
-    # DB column is `name_display_first_last`; expose as `full_name` in Python.
-    full_name = Column("name_display_first_last", Text, nullable=False)
-
-    bats = Column(String(8), nullable=True)
-    throws = Column(String(8), nullable=True)
-    primary_position = Column(String(16), nullable=True)
-
-    birth_date = Column(Date, nullable=True)
-
-    # Relationships
-    salaries = relationship("FactSalary", back_populates="player")
-    stats = relationship("FactPlayerStats", back_populates="player")
-    spotrac_maps = relationship(
-        "BridgeSpotracPlayerMap",
-        back_populates="player",
-    )
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
 
 
-class BridgeSpotracPlayerMap(Base):
-    """Bridge table mapping Spotrac (name-based) records.
+def _truncate_table(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE TABLE {TARGET_TABLE};"))
 
-    Maps Spotrac records to canonical MLBAM `player_id`.
+
+def load_spotrac_salary_csv_raw(
+    input_path: str,
+    db_url: str,
+    truncate: bool = False,
+) -> int:
+    """Load the CSV into the raw staging table.
+
+    Returns:
+        Number of rows inserted.
     """
+    path = Path(input_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Input CSV not found: {path}")
 
-    __tablename__ = "bridge_spotrac_player_map"
+    engine = create_engine(db_url)
+    _ensure_table(engine)
 
-    # A deterministic key derived from a Spotrac raw record.
-    # Example: normalized name + team + position.
-    spotrac_player_key = Column(Text, primary_key=True)
+    if truncate:
+        _truncate_table(engine)
 
-    player_id = Column(
-        Integer,
-        ForeignKey("dim_players.player_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError("CSV has no header row")
+
+        missing = [c for c in CSV_COLUMNS if c not in reader.fieldnames]
+        if missing:
+            joined = ", ".join(missing)
+            raise ValueError(f"CSV missing required columns: {joined}")
+
+        insert_sql = text(
+            f"""
+            INSERT INTO {TARGET_TABLE} (
+              season,
+              player_name,
+              position,
+              age,
+              contract_type,
+              luxury_tax_usd,
+              luxury_tax_pct,
+              cash_salary_usd,
+              free_agent_year
+            ) VALUES (
+              :season,
+              :player_name,
+              :position,
+              :age,
+              :contract_type,
+              :luxury_tax_usd,
+              :luxury_tax_pct,
+              :cash_salary_usd,
+              :free_agent_year
+            );
+            """
+        )
+
+        rows = []
+        for row in reader:
+            payload = {k: (row.get(k) or "").strip() for k in CSV_COLUMNS}
+            # Treat empty strings as NULL for free_agent_year.
+            if payload["free_agent_year"] == "":
+                payload["free_agent_year"] = None
+            rows.append(payload)
+
+    inserted = 0
+    if rows:
+        with engine.begin() as conn:
+            conn.execute(insert_sql, rows)
+        inserted = len(rows)
+
+    return inserted
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Load manual salary CSV into raw staging table (TEXT)."
+    )
+    parser.add_argument(
+        "--input",
+        default=DEFAULT_INPUT,
+        help=f"Input CSV file path (default: {DEFAULT_INPUT})",
+    )
+    parser.add_argument(
+        "--db-url",
+        default=DEFAULT_DB_URL,
+        help="Database URL for Postgres in Docker .",
+    )
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Truncate the staging table before inserting.",
     )
 
-    spotrac_name_raw = Column(Text, nullable=False)
-    team_abbr = Column(String(8), nullable=True)
-    position = Column(String(16), nullable=True)
+    args = parser.parse_args()
 
-    confidence_score = Column(
-        Numeric(5, 2),
-        nullable=False,
-        server_default="0",
-    )
-    match_method = Column(String(32), nullable=False)
-    # exact_name, fuzzy, manual_override
+    try:
+        inserted = load_spotrac_salary_csv_raw(
+            input_path=args.input,
+            db_url=args.db_url,
+            truncate=args.truncate,
+        )
+    except Exception as exc:
+        print(f"spotrac CSV raw load failed: {exc}")
+        sys.exit(1)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+    print(
+        "spotrac CSV raw load complete: "
+        f"table={TARGET_TABLE} inserted={inserted}"
     )
 
-    player = relationship("DimPlayer", back_populates="spotrac_maps")
+    if inserted == 0:
+        print("No rows inserted; failing task.")
+        sys.exit(1)
 
 
-class FactSalary(Base):
-    """Salary fact table (snapshot-based)."""
-
-    __tablename__ = "fact_salary"
-
-    season = Column(Integer, primary_key=True)
-    player_id = Column(
-        Integer,
-        ForeignKey("dim_players.player_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    snapshot_date = Column(Date, primary_key=True)
-
-    team_abbr = Column(String(8), nullable=True)
-
-    salary_usd = Column(Numeric(14, 2), nullable=True)
-    aav_usd = Column(Numeric(14, 2), nullable=True)
-
-    contract_type = Column(String(64), nullable=True)
-    source = Column(String(32), nullable=False, server_default="spotrac")
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    player = relationship("DimPlayer", back_populates="salaries")
-
-    __table_args__ = (
-        Index("idx_fact_salary_player_snapshot", "player_id", "snapshot_date"),
-    )
-
-
-class FactPlayerStats(Base):
-    """Player performance fact table (snapshot-based)."""
-
-    __tablename__ = "fact_player_stats"
-
-    season = Column(Integer, primary_key=True)
-    player_id = Column(
-        Integer,
-        ForeignKey("dim_players.player_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    snapshot_date = Column(Date, primary_key=True)
-
-    team_abbr = Column(String(8), nullable=True)
-
-    # Keep MVP stats minimal; expand as needed.
-    games = Column(Integer, nullable=True)
-
-    # Hitting
-    pa = Column(Integer, nullable=True)
-    ops = Column(Numeric(6, 3), nullable=True)
-
-    # Pitching
-    ip = Column(Numeric(6, 1), nullable=True)
-    era = Column(Numeric(6, 3), nullable=True)
-
-    # Advanced (optional; depends on the chosen source)
-    war = Column(Numeric(6, 3), nullable=True)
-
-    source = Column(String(32), nullable=False, server_default="mlb_stats_api")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    player = relationship("DimPlayer", back_populates="stats")
-
-    __table_args__ = (
-        Index("idx_fact_stats_player_snapshot", "player_id", "snapshot_date"),
-    )
-
-
-class IngestRun(Base):
-    """Optional lineage table for pipeline runs and raw snapshot paths."""
-
-    __tablename__ = "ingest_runs"
-
-    # Airflow run_id or a custom id
-    run_id = Column(Text, primary_key=True)
-    dag_id = Column(Text, nullable=True)
-    task_id = Column(Text, nullable=True)
-
-    source = Column(String(32), nullable=False)
-    # spotrac, mlb_stats_api
-    snapshot_date = Column(Date, nullable=False)
-
-    raw_path = Column(Text, nullable=True)
-    row_count = Column(Integer, nullable=True)
-
-    status = Column(String(16), nullable=False, server_default="ok")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint(
-            "source",
-            "snapshot_date",
-            "raw_path",
-            name="uq_ingest_source_date_path",
-        ),
-    )
+if __name__ == "__main__":
+    main()

@@ -57,7 +57,13 @@ with DAG(
 
     salary_load = BashOperator(
         task_id="salary_load",
-        bash_command=bash("src.load.load_salary"),
+        bash_command=(
+            "set -e; "
+            "cd /opt/airflow; "
+            "PYTHONPATH=/opt/airflow "
+            "python -m src.load.load_salary_csv "
+            "--input /opt/airflow/data/raw/manual/spotrac_bluejays_2025.csv"
+        ),
     )
 
     stats_load = BashOperator(
