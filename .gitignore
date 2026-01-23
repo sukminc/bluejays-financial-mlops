@@ -10,6 +10,5 @@ config/
 plugins/
 airflow-worker.pid
 airflow-webserver.pid
-.idea/bluejays-financial-mlops.iml
-.idea/modules.xml
-.idea/vcs.xml
+# JetBrains IDEs (DataGrip, PyCharm, IntelliJ)
+.idea/
