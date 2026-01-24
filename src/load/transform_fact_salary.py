@@ -1,7 +1,8 @@
-import os
 import pandas as pd
+import os
+import sys
 from sqlalchemy import create_engine, text
-from src.db.models import Base, FactSalary  # FactSalary 임포트 필요
+from src.db.models import Base
 
 # Configuration
 DB_URL = os.getenv(
@@ -10,86 +11,80 @@ DB_URL = os.getenv(
 )
 
 
-def transform_and_load():
-    """
-    Reads from Raw Staging, cleans currency/numeric fields,
-    and loads into the Fact Table.
-    """
-    print("=== 🏗️ Starting Transformation: Raw -> Fact Salary ===")
-    engine = create_engine(DB_URL)
+def run_transform():
+    print("=== 🔄 Starting Fact Salary Transformation ===")
 
-    print("🗑️ Dropping old fact_salary table to ensure schema match...")
-    FactSalary.__table__.drop(engine, checkfirst=True)
+    try:
+        engine = create_engine(DB_URL)
 
-    Base.metadata.create_all(engine)
+        # 1. Read from Staging
+        print("   📄 Extracting data...")
+        query = """
+        SELECT
+            season,
+            player_name,
+            cash_salary_usd,
+            luxury_tax_usd,
+            luxury_tax_pct,
+            contract_type
+        FROM stg_spotrac_bluejays_salary_raw
+        """
+        df = pd.read_sql(query, engine)
+        # 2. Clean Data
+        df['cash_salary'] = df['cash_salary_usd'].replace(
+            {r'\$': '', ',': ''}, regex=True
+        )
+        df['luxury_tax_salary'] = df['luxury_tax_usd'].replace(
+            {r'\$': '', ',': ''}, regex=True
+        )
 
-    with engine.connect() as conn:
-        df_raw = pd.read_sql(
-            "SELECT * FROM stg_spotrac_bluejays_salary_raw",
-            conn
-            )
+        df['cash_salary'] = pd.to_numeric(
+            df['cash_salary'], errors='coerce'
+        ).fillna(0)
 
-    if df_raw.empty:
-        print("⚠️ No raw data found. Skipping transformation.")
-        return
+        df['luxury_tax_salary'] = pd.to_numeric(
+            df['luxury_tax_salary'], errors='coerce'
+        ).fillna(0)
 
-    print(f"📊 Raw Rows Input: {len(df_raw)}")
+        df['luxury_tax_pct'] = pd.to_numeric(
+            df['luxury_tax_pct'], errors='coerce'
+        ).fillna(0)
 
-    # 3. Data Cleaning Function
-    def clean_currency(val):
-        """Removes '$' and ',' and converts to integer."""
-        if not val or pd.isna(val):
-            return None
-        # Normalize text: remove whitespace and currency symbols
-        s_val = str(val).lower().replace('$', '').replace(',', '').strip()
-        if s_val in ['unknown', 'invaliddata', '']:
-            return None
-        try:
-            return int(float(s_val))
-        except ValueError:
-            return None
+        # 3. Prepare DataFrame
+        df_fact = df[[
+            'season',
+            'player_name',
+            'cash_salary',
+            'luxury_tax_salary',
+            'luxury_tax_pct',
+            'contract_type'
+        ]].copy()
 
-    # Apply Cleaning
-    df_raw['clean_luxury_tax'] = df_raw['luxury_tax_usd'].apply(clean_currency)
-    df_raw['clean_cash'] = df_raw['cash_salary_usd'].apply(clean_currency)
-    df_raw['clean_season'] = pd.to_numeric(df_raw['season'], errors='coerce')
-
-    # 4. Filter: Drop rows where cleaning failed (e.g., 'Unknown' salary)
-    df_valid = df_raw.dropna(subset=['clean_luxury_tax', 'clean_season'])
-    dropped_count = len(df_raw) - len(df_valid)
-
-    if dropped_count > 0:
-        print(f"🧹 Dropped {dropped_count} rows due to invalid types.")
-
-    # 5. Prepare Final DataFrame
-    df_final = pd.DataFrame({
-        'season': df_valid['clean_season'],
-        'luxury_tax_salary': df_valid['clean_luxury_tax'],
-        'cash_salary': df_valid['clean_cash'],
-        'luxury_tax_pct': pd.to_numeric(
-            df_valid['luxury_tax_pct'], errors='coerce'
-        ),
-        'contract_type': df_valid['contract_type'],
-        'player_id': None  # Placeholder
-    })
-
-    print(f"✅ Final Rows to Load: {len(df_final)}")
-
-    # 6. Load to Fact Table
-    if not df_final.empty:
+        # 4. [CRITICAL CHANGE] Split DDL and DML to avoid Deadlocks
+        # Part A: Drop and Create Table (Transaction 1)
+        print("   🔨 Recreating Schema (DDL)...")
         with engine.begin() as conn:
-            # Drop/Create를 했으므로 Truncate는 굳이 필요 없지만 안전장치로 유지
-            conn.execute(text("TRUNCATE TABLE fact_salary RESTART IDENTITY;"))
-            df_final.to_sql(
-                'fact_salary',
-                conn,
-                if_exists='append',
-                index=False
-            )
-        print("🎉 Successfully loaded fact_salary.")
-    else:
-        print("❌ Transformation resulted in 0 rows.")
+            conn.execute(text("DROP TABLE IF EXISTS fact_salary"))
+            # Pass 'conn' here so it happens in the SAME transaction
+            Base.metadata.create_all(conn)
+
+        # Part B: Insert Data (Transaction 2)
+        # Now that the table exists and Trans 1 is closed, we can safely insert
+        print("   💾 Loading Data (DML)...")
+        df_fact.to_sql(
+            'fact_salary',
+            con=engine,
+            # Engine is safe to use now
+            if_exists='append',
+            index=False
+        )
+
+        print(f"   ✅ Success! Loaded {len(df_fact)} rows into fact_salary.")
+
+    except Exception as e:
+        print(f"❌ Transformation Failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    transform_and_load()
+    run_transform()
