@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 from pathlib import Path
 from sqlalchemy import create_engine, text
 
@@ -10,17 +11,19 @@ DB_URL = os.getenv(
 )
 BASE_DIR = Path(__file__).parent
 SQL_DIR = BASE_DIR / "sql"
+DEFAULT_TABLE = "stg_spotrac_bluejays_salary_raw"
 
 
-def run_dq_checks():
+def run_dq_checks(target_table, expect_fail=False):
     """
-    Executes SQL files in src/dq/sql/.
-    If any query returns a count > 0, the check fails.
+    Executes SQL checks against a specific target_table.
+    If expect_fail is True, the script succeeds ONLY if bad rows are found.
     """
-    print("=== 🛡️ Starting DQ Gate: Bad Data Detection ===")
+    print(f"=== 🛡️ Starting DQ Gate on table: {target_table} ===")
+    if expect_fail:
+        print("🧪 MODE: Negative Test (Expecting Failures)")
+
     engine = create_engine(DB_URL)
-
-    # Map descriptive names to SQL filenames
     checks = {
         "Null Check": "check_nulls.sql",
         "Duplicate Check": "check_duplicates.sql",
@@ -33,42 +36,58 @@ def run_dq_checks():
         for check_name, filename in checks.items():
             file_path = SQL_DIR / filename
             if not file_path.exists():
-                print(f"⚠️ Warning: {filename} not found at {file_path}")
+                print(f"⚠️ Warning: {filename} not found")
                 continue
 
             with open(file_path, 'r') as f:
-                query = f.read()
+                raw_query = f.read()
+
+            # DYNAMIC REPLACEMENT:
+            # Swap the production table name for the test table
+            query = raw_query.replace(DEFAULT_TABLE, target_table)
 
             try:
-                # Execute query. The result should be the count of bad rows.
-                # using .scalar() to get the single integer value.
-                result = conn.execute(text(query)).scalar()
-
-                # Handle None results (empty tables) safely
-                if result is None:
-                    result = 0
-                else:
-                    result = int(result)
+                result = conn.execute(text(query)).scalar() or 0
+                result = int(result)
 
                 if result == 0:
-                    print(f"✅ [PASS] {check_name}: 0 bad rows found.")
+                    print(f"✅ [PASS] {check_name}: 0 bad rows.")
                 else:
-                    print(f"❌ [FAIL] {check_name}: Found {result} bad rows!")
+                    print(f"❌ [FAIL] {check_name}:Found {result} bad rows")
                     failed_count += 1
 
             except Exception as e:
-                print(f"❌ [ERROR] Could not execute {check_name}: {e}")
+                print(f"❌ [ERROR] {check_name}: {e}")
                 failed_count += 1
 
     print("============================================")
 
-    if failed_count > 0:
-        print(f"🚨 DQ Gate FAILED. Total failures: {failed_count}")
-        sys.exit(1)  # Signal Airflow Task Failure
+    if expect_fail:
+        # NEGATIVE TEST: Success means we caught errors
+        if failed_count > 0:
+            print("🎉 Regression Test Passed: Bad data was correctly caught.")
+            sys.exit(0)
+        else:
+            print("🚨 Regression Test FAILED: Bad data slipped through!")
+            sys.exit(1)
     else:
-        print("🎉 DQ Gate PASSED. Data is clean.")
-        sys.exit(0)
+        # POSITIVE TEST: Success means no errors
+        if failed_count > 0:
+            print(f"🚨 DQ Gate FAILED. Total failures: {failed_count}")
+            sys.exit(1)
+        else:
+            print("🎉 DQ Gate PASSED. Data is clean.")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
-    run_dq_checks()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--table", default=DEFAULT_TABLE)
+    parser.add_argument(
+        "--expect-fail",
+        action="store_true",
+        help="Pass if errors are found (for testing bad data)"
+    )
+    args = parser.parse_args()
+
+    run_dq_checks(args.table, args.expect_fail)
