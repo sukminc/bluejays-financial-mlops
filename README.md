@@ -1,157 +1,141 @@
-# ⚾ Blue Jays Moneyball: Data Quality–Driven ETL Platform
+# Blue Jays Moneyball ETL
 
-![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
-![Airflow](https://img.shields.io/badge/Apache%20Airflow-2.10%2B-orange)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Data%20Warehouse-blue)
-![Pipeline Status](https://img.shields.io/badge/Pipeline-Production%20Ready-success)
-![Test Coverage](https://img.shields.io/badge/Regression%20Suite-Passing-brightgreen)
+Production-style Airflow and PostgreSQL pipeline built around one principle: if the data is not trustworthy, the pipeline should stop.
 
-## 📌 Project Overview
+This project ingests Blue Jays salary data into a staging layer, applies SQL-based data quality checks, and only materializes the fact table after the guardrails pass. It also includes a regression DAG that intentionally feeds bad data into the system to verify that the checks still fail when they should.
 
-This is a **Production-Grade Data Engineering Platform** designed to ingest, validate, and transform MLB player financial data.
+## Why This Project Matters
 
-Unlike typical analytics projects that focus solely on "getting data," this project prioritizes **Data Integrity, Auditability, and System Reliability**. It demonstrates a **Senior SDET / Data QA** approach to building pipelines: **"If the data quality cannot be guaranteed, the pipeline must fail."**
+This is the strongest data-engineering repo in my portfolio because it shows more than ingestion:
 
----
+- raw-to-staging-to-fact flow
+- explicit data quality gates
+- fail-fast behavior
+- regression validation for the guardrails themselves
 
-## 🔄 The Architectural Pivot: Reliability > Complexity
+It is less about baseball specifically and more about how I think about production pipelines: reliability first, quiet failure never.
 
-### 🚫 Phase 1: The Trap of Over-Engineering
-Initially, this project utilized a complex **Playwright & Selenium** web scraper to fetch data from Spotrac.
-* **The Issue:** DOM structure changes caused frequent silent failures. The cost of maintenance outweighed the value of automation.
-* **The Decision:** I deprecated the scraper in favor of **Manual Ingestion with Strict Validation**.
+## Architecture
 
-### ✅ Phase 2: The v2 Robust Architecture
-I refactored the system into a **"Fail-Fast" ELT Pipeline**:
-1.  **Ingestion:** Robust loading of raw CSVs into a `TEXT`-based Staging Layer (No type errors on load).
-2.  **Guardrails:** A SQL-based **DQ Gate** that blocks downstream processing if data violates core business rules (Nulls, Duplicates, Invalid Formats).
-3.  **Transformation:** A cleaned `Fact` table is created only *after* quality checks pass.
-4.  **Regression Testing:** A dedicated CI/CD DAG that tests the pipeline itself against known "Bad Data" to ensure the safety mechanisms are working.
+### Production pipeline
 
----
+`bluejays_v2_simple_pipeline`
 
-## 🏗 System Architecture
+1. Load raw CSV into a text-first staging table
+2. Run SQL DQ checks against the staging table
+3. Stop immediately if checks fail
+4. Transform clean rows into the fact table
 
-### 1️⃣ The Production Pipeline (`bluejays_v2_simple_pipeline`)
+### Regression suite
 
-```mermaid
-graph TD
-    A[Source: Spotrac CSV] -->|ingest_raw.py| B[Staging: Raw Text Table]
-    B --> C{DQ Gate}
-    C -->|❌ Fail| D[BLOCK PIPELINE]
-    C -->|✅ Pass| E[Transformation Layer]
-    E -->|Clean & Type Cast| F[(Fact Table: fact_salary)]
+`bluejays_regression_suite`
 
-```
+1. Load a clean dataset and assert the DQ gate passes
+2. Load a bad dataset and assert the DQ gate fails
 
-### 2️⃣ The Regression Suite (`bluejays_regression_suite`)
+That second step is the key design choice. The project does not just have data quality rules; it proves they still work.
 
-*Runs on deployment to verify that DQ logic catches errors.*
+## Core Design Decisions
 
-```mermaid
-graph TD
-    subgraph Positive Test
-    A[Load Clean Data] --> B{Verify DQ Passes}
-    B -->|Success| C[✅ Test Passed]
-    end
-    
-    subgraph Negative Test
-    D[Load Bad Data] --> E{Verify DQ Fails}
-    E -->|Caught Error| F[✅ Test Passed]
-    end
+### 1. Text-first ingestion
 
-```
+Raw salary data is loaded as text first.
 
----
+Why:
 
-## 🛡️ Key Features (The SDET Approach)
+- source systems are messy
+- currency formatting and stray values break typed ingestion
+- losing raw source data early is expensive
 
-### 1. Robust Raw Ingestion
+So the sequence is:
 
-We load all data as `TEXT` first.
+`load as text -> validate -> clean -> cast`
 
-* **Why?** Loading `$10,000` directly into an `INTEGER` column causes ingestion failures.
-* **Solution:** Load as text -> Audit -> Clean -> Cast. This ensures we never lose source data.
+### 2. SQL-based DQ gate
 
-### 2. The Data Quality Gate (Fail-Fast)
+Checks live under [src/dq/sql](/Users/chrisyoon/GitHub/bluejays-financial-mlops/src/dq/sql) and include:
 
-Before any transformation, we run SQL checks located in `src/dq/sql/`.
+- null checks
+- duplicate checks
+- invalid type / format checks
 
-* **Null Integrity:** Ensures key fields (Player Name, Season) are present.
-* **Uniqueness:** Prevents duplicate salary entries.
-* **Type Validation:** Uses Regex (`!~ '^\$?[0-9,]+'`) to detect garbage strings like "Unknown" or "TBD" in numeric fields.
+The gate is executed by [src/dq/checks.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/src/dq/checks.py) and fails the pipeline if bad rows are detected.
 
-### 3. The Regression Suite (CI/CD)
+### 3. Regression testing for data quality logic
 
-How do we know our tests work? **We test the tests.**
+The Airflow regression suite intentionally loads `spotrac_bad_data.csv` and expects the DQ step to fail.
 
-* The `bluejays_regression_suite` DAG loads a purely malicious dataset (`spotrac_bad_data.csv`).
-* It asserts that the pipeline **fails**.
-* If the pipeline accidentally succeeds on bad data, the Regression Suite fails, alerting the engineer that a guardrail is broken.
+That means the project verifies not only the happy path, but also whether the protection layer is still alive.
 
----
-
-## 📂 Project Structure
+## Repo Structure
 
 ```text
 bluejays-financial-mlops/
 ├── dags/
-│   ├── bluejays_simple_dag.py        # 🚀 Prod: Ingest -> DQ -> Transform
-│   └── bluejays_regression_suite.py  # 🧪 QA: Meta-testing the pipeline
+│   ├── bluejays_simple_dag.py
+│   └── bluejays_regression_suite.py
 ├── src/
 │   ├── db/
-│   │   └── models.py                 # SQLAlchemy Schemas (Staging & Fact)
 │   ├── dq/
-│   │   ├── checks.py                 # The DQ Gate Logic
-│   │   └── sql/                      # SQL Validation Rules
-│   │       ├── check_nulls.sql
-│   │       ├── check_duplicates.sql
-│   │       └── check_invalid_types.sql
+│   │   ├── checks.py
+│   │   └── sql/
 │   └── load/
-│       ├── ingest_raw.py             # Universal CSV Loader (Prod/Test modes)
-│       └── transform_fact_salary.py  # ELT Logic (Text -> Number)
 ├── data/
 │   └── raw/manual/
-│       ├── spotrac_bluejays_2025.csv # ✅ Golden Data
-│       └── spotrac_bad_data.csv      # ❌ Test Data (Chaos Engineering)
-└── docker-compose.yaml
-
+├── docker-compose.yaml
+└── requirements.txt
 ```
 
----
+## Important Files
 
-## ⚙️ How to Run
+- [dags/bluejays_simple_dag.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/dags/bluejays_simple_dag.py)
+  Production flow: ingest -> DQ -> transform.
+- [dags/bluejays_regression_suite.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/dags/bluejays_regression_suite.py)
+  Regression flow for clean and bad datasets.
+- [src/dq/checks.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/src/dq/checks.py)
+  Gate execution logic and pass/fail behavior.
+- [src/load/ingest_raw.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/src/load/ingest_raw.py)
+  Raw ingestion into staging.
+- [src/load/transform_fact_salary.py](/Users/chrisyoon/GitHub/bluejays-financial-mlops/src/load/transform_fact_salary.py)
+  Post-validation transformation into the fact layer.
 
-### 1. Build & Start
+## Stack
+
+- Python
+- Apache Airflow
+- PostgreSQL
+- SQLAlchemy
+- Docker Compose
+
+## Running Locally
 
 ```bash
 docker-compose build
 docker-compose up -d
-
 ```
 
-### 2. Run the Production Pipeline
+Airflow UI:
 
-1. Go to `http://localhost:8080` (User/Pass: `airflow`).
-2. Trigger **`bluejays_v2_simple_pipeline`**.
-3. Observe: Ingest (Success) → DQ (Success) → Transform (Success).
+- `http://localhost:8080`
+- username: `airflow`
+- password: `airflow`
 
-### 3. Run the Regression Test
+Run:
 
-1. Trigger **`bluejays_regression_suite`**.
-2. Observe:
-* **Task 1 (Clean Data):** Passes.
-* **Task 2 (Bad Data):** The script detects the bad data, asserts failure, and returns **Success** (Green) because the system worked as designed.
+- `bluejays_v2_simple_pipeline`
+- `bluejays_regression_suite`
 
+## Current Status
 
+This repo is in strong portfolio shape.
 
----
+What it demonstrates well:
 
-## 👨‍💻 About the Author
+- Airflow orchestration
+- warehouse-minded staging and transformation
+- data quality as a gate, not a dashboard
+- regression thinking applied to data engineering
 
-**Chris (Suk Min) Yoon**
-*Senior SDET / Data QA Engineer (10+ Years Experience)*
+## Hiring Signal
 
-Specializing in **ETL Validation**, **Data Integrity**, and **Automation-First Quality Systems**.
-
-> **Portfolio Note:** This project demonstrates the discipline to prioritize system stability. By implementing a Regression Suite for the data pipeline itself, I ensure that data quality rules are treated as first-class code citizens that must pass CI/CD.
+If you want to know how I think as a data engineer, this is one of the clearest repos to read.
