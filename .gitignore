@@ -12,3 +12,4 @@ airflow-worker.pid
 airflow-webserver.pid
 # JetBrains IDEs (DataGrip, PyCharm, IntelliJ)
 .idea/
+identifier.sqlite
