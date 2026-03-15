@@ -1,33 +1,35 @@
 # CLAUDE.md — Blue Jays Moneyball ETL
 
-## Brand Hub
-**onepercentbetter.poker** — this project is listed there as `Blue Jays Moneyball ETL`.
-If it's removed from the site, it's no longer a brand asset.
-Owner: Chris S. Yoon · github.com/sukminc
+## Repo Role
 
-## What this is
-Production-grade ELT pipeline. Integrates Spotrac payroll data vs. MLB stats.
-Status: `live` (100% MVP)
-Slug on hub: `bluejays-moneyball` · Repo: `sukminc/bluejays-financial-mlops`
+Archive proof-of-work repo for data engineering depth.
 
-## Core Value
-Proof-of-skill in data engineering: self-validating pipelines, CI/CD-native DQ gates,
-Airflow orchestration. Same "find the edge" philosophy applied to sports analytics.
+This repo is not part of the poker hub.
+Its job is to stay legible as a strong data-engineering example:
 
-## Stack
-- Apache Airflow (orchestration)
-- PostgreSQL (warehouse)
-- Python + Pandas (transforms)
-- Docker (local + CI parity)
-- GitHub Actions (CI/CD)
+- Airflow orchestration
+- PostgreSQL pipeline design
+- fail-fast data quality gates
+- regression validation of those gates
 
-## Key Architecture
-- DQ gates block all downstream transforms until checks pass — no silent failures
-- Regression DAG fires known-bad datasets against DQ gates, asserting failure
-- Guardrails are CI/CD citizens: if the safety net breaks, the build breaks
+## Guardrails
+
+- Preserve clarity over expansion.
+- Keep the repo useful as hiring proof, not as a new active product line.
+- Do not add story layers that distract from the pipeline quality signal.
+
+## Current Truth
+
+Trust `README.md` for current implementation and why it matters.
+
+The strongest signal in this repo is:
+
+- raw -> staging -> fact flow
+- DQ gates block downstream work
+- regression DAG proves the guardrails still fail when they should
 
 ## Commands
+
 ```bash
-docker-compose up -d          # Start Airflow + Postgres
-# Access Airflow UI: localhost:8080
+docker-compose up -d
 ```
